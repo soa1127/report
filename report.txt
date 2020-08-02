@@ -1,0 +1,169 @@
+#include <LiquidCrystal.h>
+#include <core_build_options.h>
+#include <swRTC.h>
+
+swRTC rtc;
+int afk_minutes, afk_seconds;
+boolean sit = false;
+
+
+// 보드의 3, 4, 10, 11, 12, 13번핀을 사용하도록 지정된 lcd객체를 생성
+LiquidCrystal lcd(3, 4, 10, 11, 12, 13);
+
+// tmp36온도 센서를 A0핀으로 설정
+int tmpSensor = A0;
+// 열선 패드를 각각 5,6,7번 핀으로 설정
+int heatingPad1 = 5;
+int heatingPad2 = 6;
+int heatingPad3 = 7;
+
+// 최고 온도 값을 저장합니다.
+const int tmpHigh = 80;
+// 현재 설정 온도 값을 나타내는 변수입니다.
+int tmpSetting = 0;
+
+// tmp36센서가 측정한 현재 온도를 저장할 변수입니다.
+float tmpCurrent;
+// tmp36센서값으로 읽어온 수치를 계산하기 위해 임시적으로 필요한 변수입니다.
+float tmpTemp;
+
+
+void setup() {
+    
+
+    //rtc세팅
+    rtc.stopRTC();
+    rtc.setTime(0, 0, 0);
+    rtc.setDate(1, 1, 2000);
+  
+    pinMode(heatingPad1, OUTPUT);
+    pinMode(heatingPad2, OUTPUT);
+    pinMode(heatingPad3, OUTPUT);
+
+  
+    // off
+    pinMode(off, INPUT_PULLUP);
+    // 고온 설정
+    pinMode(High, INPUT_PULLUP);
+    // 설정된 온도(off/고온)을 저장해둘 변수입니다.
+    tmpSetting = 0;
+
+    // 16개의 셀과 2개의 줄을 사용하도록 설정합니다.
+    lcd.begin(16, 2);
+    // LCD의 모든 텍스트를 제거합니다.
+    lcd.clear();
+}
+
+void loop() {
+
+    int sensorValue = analogRead(A0); //압력센서에서 값을 읽어온다    
+    //압력센서의 Output값이 100이상일 경우 허리를 보조기에 기대고 있다고 생각하고 타이머를 시작한다.
+    if (sensorValue > 100) {
+        lcd.print("start");
+        rtc.startRTC(); //rtc시작(시간 측정)
+        support = true; //기댄 상태로 변경
+
+
+    // tmp36센서를 이용하여 아래와 같이 온도를 계산합니다.
+        tmpTemp = (float)analogRead(tmpSensor) * 5 / 1024;
+        tmpCurrent = 100 * (tmpTemp - 0.5);
+
+        //압력센서의 측정값이 계속 100 이상일 경우 while루프 반복
+        while (sensorValue > 100 && support) {
+            delay(1000);
+            sensorValue = analogRead(A0); //압력센서의 값을 읽어온다
+
+            lcd.print(rtc.getMinutes(), DEC);
+            lcd.print(":");
+            lcd.print(rtc.getSeconds(), DEC);
+
+            // 열선패드에 전원을 공급합니다.
+            digitalWrite(heatingPad1, HIGH);
+            digitalWrite(heatingPad2, HIGH);
+            digitalWrite(heatingPad3, HIGH);
+
+
+             // 현재의 온도 값이 설정 값보다 높아지면 열선 패드에 전원 공급을 중단합니다.
+            if ((tmpSetting != 0) && (tmpCurrent > tmpSetting)) {
+                // 열선패드에 전원 공급을 중단합니다.
+                digitalWrite(heatingPad1, LOW);
+                digitalWrite(heatingPad2, LOW);
+                digitalWrite(heatingPad3, LOW);
+
+                // lcd의 모든 텍스트를 제거합니다.
+                lcd.clear();
+                // 0번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 0);
+                // 현재 측정되는 온도 수치를 출력합니다.    
+                lcd.print("CURRENT : ");
+                lcd.print(tmpCurrent);
+                // 1번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 1);
+                lcd.print(" bye ");
+                lcd.print(tmpSetting);
+                lcd.print("C");
+
+                // 열선패드의 온도를 낮추기 위해 1분간 전원 공급을 중단합니다.
+                delay(60000);
+
+
+                //압력이 감지되지 않을 때
+                if (sensorValue < 100) { // 압력센서의 값이 100이하로 떨어진 경우
+                    afk_minutes = rtc.getMinutes(); // 시간을 저장
+                    afk_seconds = rtc.getSeconds();
+                    while (sensorValue < 100 && sit) {
+                        delay(1000);
+                        sensorValue = analogRead(A0);
+                        Serial.println(rtc.getSeconds());
+                        //시간 초기화
+                        if (afk_minutes + 3 == rtc.getMinutes() && afk_seconds == rtc.getSeconds()) {
+                            sit = false; //상태를 false로 변환
+                            lcd.print("good");
+                            rtc.stopRTC();        //rtc정지 및 시간 초기화
+                            rtc.setTime(0, 0, 0);
+                            rtc.setDate(1, 1, 2000);
+                        }
+                    }
+                }
+
+            if (tmpSetting == 0) {
+                // 0번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 0);
+                // 메시지를 출력합니다.  
+                lcd.print(" WELCOME. ");
+                // 1번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 1);
+
+            }
+            // 설정 온도가 0일 경우lcd패널에 출력되는 메시지입니다.
+            else if (tmpSetting == tmpoff) {
+                // 0번째 줄 0번째 셀에 입력합니다. 
+                lcd.setCursor(0, 0);
+                lcd.print("SETTING : off ");
+                // 1번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 1);
+                // 현재 측정되는 온도 수치를 출력합니다.  
+                lcd.print("CURRENT : ");
+                lcd.print(tmpCurrent);
+            }
+            // 설정 온도가 고온일 경우 lcd패널에 출력되는 메시지입니다.
+            else if (tmpSetting == tmpHigh) {
+                // 0번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 0);
+                // 메시지를 출력합니다.
+                lcd.print("SETTING : Bad pose");
+                // 1번째 줄 0번째 셀에 입력합니다.
+                lcd.setCursor(0, 1);
+                // 현재 측정되는 온도 수치를 출력합니다.
+                lcd.print("CURRENT : ");
+                lcd.print(tmpCurrent);
+            }
+            
+            }
+           
+         
+         
+            // lcd의 모든 텍스트를 제거합니다.
+            lcd.clear();
+        }
+    }
